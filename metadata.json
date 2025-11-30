@@ -1,0 +1,5 @@
+{
+  "name": "CamGenius - Interactive Cam Designer",
+  "description": "A professional-grade cam design and analysis tool. Synthesize follower motion using standard kinematic functions (Cycloidal, Harmonic, Polynomial, etc.) and generate accurate cam profiles for various follower types (Translating/Oscillating, Roller/Flat-faced). Visualizes displacement, velocity, acceleration, jerk, and real-time cam geometry.",
+  "requestFramePermissions": []
+}
