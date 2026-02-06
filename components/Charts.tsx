@@ -49,10 +49,10 @@ const ChartContainer = ({ title, dataKey, data, color, unit, currentTheta }: any
 const Charts: React.FC<ChartsProps> = ({ data, currentTheta }) => {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <ChartContainer title="Displacement (S)" dataKey="s" data={data} color="#3b82f6" unit="mm/deg" currentTheta={currentTheta} />
-      <ChartContainer title="Velocity (V)" dataKey="v" data={data} color="#10b981" unit="vel factor" currentTheta={currentTheta} />
-      <ChartContainer title="Acceleration (A)" dataKey="a" data={data} color="#f59e0b" unit="acc factor" currentTheta={currentTheta} />
-      <ChartContainer title="Jerk (J)" dataKey="j" data={data} color="#ef4444" unit="jerk factor" currentTheta={currentTheta} />
+      <ChartContainer title="Displacement (S)" dataKey="s" data={data} color="#3b82f6" unit="" currentTheta={currentTheta} />
+      <ChartContainer title="Velocity (V)" dataKey="v" data={data} color="#10b981" unit="" currentTheta={currentTheta} />
+      <ChartContainer title="Acceleration (A)" dataKey="a" data={data} color="#f59e0b" unit="" currentTheta={currentTheta} />
+      <ChartContainer title="Jerk (J)" dataKey="j" data={data} color="#ef4444" unit="" currentTheta={currentTheta} />
     </div>
   );
 };

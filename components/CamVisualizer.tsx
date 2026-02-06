@@ -6,7 +6,7 @@ import { Play, Pause, RotateCcw, Layers, RefreshCw } from 'lucide-react';
 interface CamVisualizerProps {
   data: SimulationPoint[];
   params: CamParams;
-  currentTheta: number; // Signed angle from App
+  currentTheta: number; 
   isPlaying: boolean;
   onPlayChange: (playing: boolean) => void;
   onThetaChange: (theta: number) => void;
@@ -38,35 +38,16 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
   // Helper: Linear interpolation for smooth follower movement
   const getInterpolatedLift = (theta: number) => {
     if (data.length === 0) return 0;
-    // Normalize theta to positive 0-360 range for lookup in data
     let t = theta % 360;
     if (t < 0) t += 360;
-    
-    // Data is generated 0-360 inclusive.
-    // Calculate step based on data length (e.g. 721 points -> step 0.5)
     const step = 360 / (data.length - 1);
-    
     const indexFloat = t / step;
     const idx1 = Math.floor(indexFloat);
     const idx2 = Math.min(idx1 + 1, data.length - 1);
     const ratio = indexFloat - idx1;
-    
     const s1 = data[idx1]?.s ?? 0;
     const s2 = data[idx2]?.s ?? 0;
-    
     return s1 + (s2 - s1) * ratio;
-  };
-
-  // Helper: Calculate Follower Transformation relative to Cam (Inversion)
-  const getFollowerTransform = (theta: number) => {
-    // If Cam rotates CW (Machine View), the Frame rotates CCW relative to Cam.
-    // In SVG, positive rotation is CW. So CCW is negative.
-    // Thus if params.rotation === 'CW', we rotate -theta.
-    // If Cam rotates CCW, Frame rotates CW relative to Cam (+theta).
-    // Note: 'theta' here is the magnitude of the angle from 0.
-    const rot = params.rotation === 'CW' ? -theta : theta;
-    const s = getInterpolatedLift(theta);
-    return { rotation: rot, lift: s };
   };
 
   useEffect(() => {
@@ -77,281 +58,180 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
 
     const width = svgRef.current.clientWidth;
     const height = svgRef.current.clientHeight;
-    const margin = 20;
-    const maxDim = Math.min(width, height) / 2 - margin;
+    const margin = 50;
+
+    // 1. CALCULATE WORLD BOUNDS
+    // We need to know the maximum extent of the mechanism to scale it to fit the screen.
+    const camMaxR = d3.max(data, d => Math.sqrt(d.x * d.x + d.y * d.y)) || params.baseRadius;
     
-    // Determine scale based on geometry
-    const maxR = d3.max(data, d => Math.sqrt(d.x*d.x + d.y*d.y)) || 50;
-    const scaleDomain = maxR * 2.2; 
+    let worldExtent = camMaxR;
+    const isOscillating = params.followerType.includes('Oscillating');
     
-    // SVG coordinate system: y increases downwards. 
-    // We'll flip y in drawing (scale(-val)) to make math +y go Up.
-    const scale = d3.scaleLinear()
-      .domain([-scaleDomain, scaleDomain])
-      .range([-maxDim, maxDim]);
-
-    // Center Group
-    const g = svg.append("g")
-      .attr("transform", `translate(${width/2},${height/2})`);
-
-    // Axes
-    const axisColor = "#334155";
-    g.append("line").attr("x1", -maxDim).attr("y1", 0).attr("x2", maxDim).attr("y2", 0).attr("stroke", axisColor).attr("stroke-dasharray", "4 4");
-    g.append("line").attr("x1", 0).attr("y1", -maxDim).attr("x2", 0).attr("y2", maxDim).attr("stroke", axisColor).attr("stroke-dasharray", "4 4");
-
-    // --- CAM GROUP ---
-    // Rotates in machine view. currentTheta is signed.
-    // SVG rotate(angle) is Clockwise.
-    // If rotation is CW, currentTheta increases (0, 1, 2). rotate(1) is CW. Correct.
-    // If rotation is CCW, currentTheta decreases (0, -1, -2). rotate(-1) is CCW. Correct.
-    const camRotation = currentTheta;
-    const camGroup = g.append("g")
-       .attr("transform", `rotate(${camRotation})`);
-
-    // Helper to draw a single ghost follower
-    const drawGhostFollower = (container: any, theta: number, color: string, opacity: number, isHighlight: boolean = false) => {
-        const { rotation: rot, lift: s } = getFollowerTransform(theta);
-        
-        const ghost = container.append("g")
-          .attr("transform", `rotate(${rot})`)
-          .attr("opacity", opacity);
-
-        // Draw Follower in "Home" position (Horizontal Right)
-        if (params.followerType.includes('Translating')) {
-           const yOffset = scale(-params.offset) - scale(0); // SVG Y Flip (positive offset = up)
-           let xPos = 0;
-           
-           if (params.followerType === FollowerType.TRANSLATING_ROLLER) {
-              const R_prime = Math.sqrt(Math.pow(params.baseRadius + params.followerRadius, 2) - Math.pow(params.offset, 2));
-              xPos = scale(R_prime + s) - scale(0);
-              
-              const circle = ghost.append("circle")
-                .attr("cx", xPos).attr("cy", yOffset)
-                .attr("r", scale(params.followerRadius) - scale(0))
-                .attr("fill", isHighlight ? color : "none")
-                .attr("stroke", color);
-                
-              if (isHighlight) circle.attr("stroke-width", 2);
-
-           } else {
-              const xVal = params.baseRadius + s;
-              xPos = scale(xVal) - scale(0);
-              ghost.append("line")
-                .attr("x1", xPos).attr("y1", yOffset - 30)
-                .attr("x2", xPos).attr("y2", yOffset + 30)
-                .attr("stroke", color)
-                .attr("stroke-width", isHighlight ? 3 : 1);
-           }
-        } else {
-           // Oscillating
-           const pivotX = scale(params.pivotDistance) - scale(0);
-           const pivotY = 0;
-           
-           let phi0 = 0;
-           if (params.followerType === FollowerType.OSCILLATING_ROLLER) {
-              const num = Math.pow(params.pivotDistance, 2) + Math.pow(params.followerLength, 2) - Math.pow(params.baseRadius + params.followerRadius, 2);
-              const den = 2 * params.pivotDistance * params.followerLength;
-              phi0 = Math.acos(Math.max(-1, Math.min(1, num/den)));
-           } else {
-              const AE = (params.pivotDistance * params.baseRadius) / (params.baseRadius + params.offset);
-              const DE = Math.sqrt(Math.max(0, AE*AE - params.baseRadius*params.baseRadius));
-              phi0 = Math.atan2(params.baseRadius, DE);
-           }
-           
-           const currentPhi = phi0 + (s * Math.PI / 180);
-           
-           const tipMathX = params.pivotDistance - params.followerLength * Math.cos(currentPhi);
-           const tipMathY = params.followerLength * Math.sin(currentPhi);
-           
-           const gx1 = pivotX;
-           const gy1 = pivotY;
-           const gx2 = scale(tipMathX) - scale(0);
-           const gy2 = scale(-tipMathY) - scale(0);
-           
-           if (!isHighlight) {
-             ghost.append("line")
-               .attr("x1", gx1).attr("y1", gy1)
-               .attr("x2", gx2).attr("y2", gy2)
-               .attr("stroke", "#cbd5e1");
-           }
-             
-           if (params.followerType === FollowerType.OSCILLATING_ROLLER) {
-              const circle = ghost.append("circle")
-                .attr("cx", gx2).attr("cy", gy2)
-                .attr("r", scale(params.followerRadius) - scale(0))
-                .attr("fill", isHighlight ? color : "none")
-                .attr("stroke", color);
-                
-              if (isHighlight) circle.attr("stroke-width", 2);
-
-           } else {
-              // Flat face normal at tip
-              const dx = gx2 - gx1;
-              const dy = gy2 - gy1;
-              const len = Math.sqrt(dx*dx + dy*dy);
-              const ux = -dy/len; const uy = dx/len;
-              ghost.append("line")
-                .attr("x1", gx2 - ux*30).attr("y1", gy2 - uy*30)
-                .attr("x2", gx2 + ux*30).attr("y2", gy2 + uy*30)
-                .attr("stroke", color)
-                .attr("stroke-width", isHighlight ? 3 : 1);
-           }
-        }
-    };
-
-    // 1. Inversion Construction (Ghosts)
-    if (showInversion) {
-      const ghostGroup = camGroup.append("g").attr("class", "ghosts");
-      const step = 20;
-      
-      // Standard Grid
-      for (let t = 0; t < 360; t += step) {
-        drawGhostFollower(ghostGroup, t, "#f59e0b", 0.15, false);
-      }
-      
-      // Highlight Max Pressure Angle
-      if (maxPaPoint) {
-         drawGhostFollower(ghostGroup, maxPaPoint.theta, "#ef4444", 0.9, true);
-         
-         // Add label for Max PA
-         const { rotation: rot } = getFollowerTransform(maxPaPoint.theta);
-         const labelGroup = ghostGroup.append("g")
-            .attr("transform", `rotate(${rot})`);
-            
-         const rLabel = scale(params.baseRadius * 1.8) - scale(0);
-         labelGroup.append("text")
-            .attr("x", rLabel)
-            .attr("y", 0)
-            .attr("fill", "#ef4444")
-            .attr("font-size", "10px")
-            .attr("font-weight", "bold")
-            .text(`Max PA: ${Math.abs(maxPaPoint.pressureAngle).toFixed(1)}°`);
-      }
+    if (isOscillating) {
+      // Pivot distance and follower length are part of the machine
+      worldExtent = Math.max(worldExtent, params.pivotDistance, params.pivotDistance + params.followerRadius);
+      // Roughly include the swing range
+      worldExtent = Math.max(worldExtent, params.pivotDistance + params.followerLength);
+    } else {
+      // Stem usually goes out to at least 2x base radius
+      worldExtent = Math.max(worldExtent, params.baseRadius * 2.5);
+      worldExtent = Math.max(worldExtent, Math.abs(params.offset) + params.followerRadius);
     }
 
-    // 2. Cam Profile
+    // 2. SCALE FACTOR (Pixels per World Unit)
+    // Map world units to screen pixels. Origin is at 0,0 (cam center).
+    const availableDim = Math.min(width, height) / 2 - margin;
+    const pxPerUnit = availableDim / worldExtent;
+
+    // Utility to convert world distance to pixel distance
+    const toPx = (val: number) => val * pxPerUnit;
+
+    // 3. DRAWING
+    const baseStroke = 1.5;
+    const axisColor = "#1e293b";
+
+    // Center Group (Cam Pivot)
+    // We offset the center slightly to the left if it's a translating follower with a long stem
+    const xOffset = isOscillating ? 0 : -toPx(params.baseRadius * 0.5);
+    const g = svg.append("g")
+      .attr("transform", `translate(${width/2 + xOffset},${height/2})`);
+
+    // Grid axes
+    g.append("line").attr("x1", -width).attr("y1", 0).attr("x2", width).attr("y2", 0).attr("stroke", axisColor).attr("stroke-dasharray", "4 4");
+    g.append("line").attr("x1", 0).attr("y1", -height).attr("x2", 0).attr("y2", height).attr("stroke", axisColor).attr("stroke-dasharray", "4 4");
+
+    // Cam Group (Rotates)
+    const camGroup = g.append("g").attr("transform", `rotate(${currentTheta})`);
+
+    // Profile Path
     const lineGenerator = d3.line<SimulationPoint>()
-      .x(d => scale(d.x))
-      .y(d => scale(-d.y)) // Flip Y for SVG
+      .x(d => toPx(d.x))
+      .y(d => toPx(-d.y))
       .curve(d3.curveLinearClosed);
 
     camGroup.append("path")
       .datum(data)
       .attr("fill", "#1e293b")
-      .attr("fill-opacity", 0.8)
+      .attr("fill-opacity", 0.7)
       .attr("stroke", "#60a5fa")
-      .attr("stroke-width", 2)
+      .attr("stroke-width", baseStroke)
       .attr("d", lineGenerator);
-      
-    // Base Circle
+
+    // Base Circle Reference
     camGroup.append("circle")
-      .attr("r", scale(params.baseRadius) - scale(0))
+      .attr("r", toPx(params.baseRadius))
       .attr("fill", "none")
-      .attr("stroke", "#475569")
-      .attr("stroke-dasharray", "3 3");
-      
+      .attr("stroke", "#334155")
+      .attr("stroke-dasharray", "2 2");
+
+    // Cam Pivot Marker
     camGroup.append("circle").attr("r", 4).attr("fill", "#94a3b8");
 
-    // --- FOLLOWER GROUP (Stationary in Machine Frame) ---
-    // Drawn horizontally to the Right (+X axis)
-    const followerGroup = g.append("g");
-    const currentLift = getInterpolatedLift(Math.abs(currentTheta)); // Look up by magnitude
-    
-    if (params.followerType.includes('Translating')) {
-       // Horizontal Translation
-       const yOffset = scale(-params.offset) - scale(0); // Up if positive
-       let xPos = 0;
-       
-       if (params.followerType === FollowerType.TRANSLATING_ROLLER) {
-          const R_prime = Math.sqrt(Math.pow(params.baseRadius + params.followerRadius, 2) - Math.pow(params.offset, 2));
-          const xVal = R_prime + currentLift;
-          xPos = scale(xVal) - scale(0);
-          
-          followerGroup.append("circle")
-            .attr("cx", xPos).attr("cy", yOffset)
-            .attr("r", scale(params.followerRadius) - scale(0))
-            .attr("fill", "#f59e0b").attr("stroke", "white").attr("stroke-width", 1.5);
-            
-          // Stem
-          followerGroup.append("line")
-            .attr("x1", xPos).attr("y1", yOffset)
-            .attr("x2", xPos + 120).attr("y2", yOffset) 
-            .attr("stroke", "#cbd5e1").attr("stroke-width", 6).attr("stroke-linecap", "round");
-       } else {
-          const xVal = params.baseRadius + currentLift;
-          xPos = scale(xVal) - scale(0);
-          
-          // Face
-          followerGroup.append("line")
-            .attr("x1", xPos).attr("y1", yOffset - 50)
-            .attr("x2", xPos).attr("y2", yOffset + 50)
-            .attr("stroke", "#f59e0b").attr("stroke-width", 4);
-            
-          // Stem
-          followerGroup.append("line")
-             .attr("x1", xPos).attr("y1", yOffset)
-             .attr("x2", xPos + 120).attr("y2", yOffset)
-             .attr("stroke", "#cbd5e1").attr("stroke-width", 6).attr("stroke-linecap", "round");
-       }
-       // Guide
-       g.append("rect")
-         .attr("x", maxDim + 10)
-         .attr("y", yOffset - 12)
-         .attr("width", 60).attr("height", 24)
-         .attr("fill", "#334155").attr("fill-opacity", 0.3).attr("stroke", "#475569");
+    // Follower Drawing Function (shared for inversion and active follower)
+    const drawFollower = (container: any, theta: number, color: string, opacity: number, isHighlight: boolean = false) => {
+      const s = getInterpolatedLift(theta);
+      const follower = container.append("g");
+      
+      if (params.followerType.includes('Translating')) {
+        const yCenter = toPx(-params.offset);
+        let xContact = 0;
+        const stemLen = toPx(params.baseRadius * 1.5);
 
-    } else {
-      // Oscillating (Stationary drawing)
-      const pivotX = scale(params.pivotDistance) - scale(0);
-      const pivotY = 0;
-      
-      let phi0 = 0;
-      if (params.followerType === FollowerType.OSCILLATING_ROLLER) {
-         const num = Math.pow(params.pivotDistance, 2) + Math.pow(params.followerLength, 2) - Math.pow(params.baseRadius + params.followerRadius, 2);
-         const den = 2 * params.pivotDistance * params.followerLength;
-         phi0 = Math.acos(Math.max(-1, Math.min(1, num/den)));
+        if (params.followerType === FollowerType.TRANSLATING_ROLLER) {
+          const R_prime = Math.sqrt(Math.pow(params.baseRadius + params.followerRadius, 2) - Math.pow(params.offset, 2));
+          xContact = toPx(R_prime + s);
+          
+          follower.append("circle")
+            .attr("cx", xContact).attr("cy", yCenter)
+            .attr("r", Math.max(2, toPx(params.followerRadius)))
+            .attr("fill", isHighlight ? color : "none")
+            .attr("stroke", color)
+            .attr("stroke-width", isHighlight ? baseStroke * 2 : baseStroke);
+          
+          if (!opacity || opacity > 0.5) {
+            follower.append("line")
+              .attr("x1", xContact).attr("y1", yCenter).attr("x2", xContact + stemLen).attr("y2", yCenter)
+              .attr("stroke", "#475569").attr("stroke-width", 6).attr("stroke-linecap", "round");
+          }
+        } else {
+          xContact = toPx(params.baseRadius + s);
+          const faceHalf = toPx(params.baseRadius * 0.4);
+          follower.append("line")
+            .attr("x1", xContact).attr("y1", yCenter - faceHalf)
+            .attr("x2", xContact).attr("y2", yCenter + faceHalf)
+            .attr("stroke", color).attr("stroke-width", isHighlight ? baseStroke * 3 : baseStroke * 2);
+          
+          if (!opacity || opacity > 0.5) {
+            follower.append("line")
+              .attr("x1", xContact).attr("y1", yCenter).attr("x2", xContact + stemLen).attr("y2", yCenter)
+              .attr("stroke", "#475569").attr("stroke-width", 6).attr("stroke-linecap", "round");
+          }
+        }
       } else {
-         const AE = (params.pivotDistance * params.baseRadius) / (params.baseRadius + params.offset);
-         const DE = Math.sqrt(Math.max(0, AE*AE - params.baseRadius*params.baseRadius));
-         phi0 = Math.atan2(params.baseRadius, DE);
+        // Oscillating
+        const pivotX = toPx(params.pivotDistance);
+        let phi0 = 0;
+        if (params.followerType === FollowerType.OSCILLATING_ROLLER) {
+           const num = Math.pow(params.pivotDistance, 2) + Math.pow(params.followerLength, 2) - Math.pow(params.baseRadius + params.followerRadius, 2);
+           const den = 2 * params.pivotDistance * params.followerLength;
+           phi0 = Math.acos(Math.max(-1, Math.min(1, num/den)));
+        } else {
+           const AE = (params.pivotDistance * params.baseRadius) / (params.baseRadius + params.offset);
+           const DE = Math.sqrt(Math.max(0, AE*AE - params.baseRadius*params.baseRadius));
+           phi0 = Math.atan2(params.baseRadius, DE);
+        }
+        
+        const phi = phi0 + (s * Math.PI / 180);
+        const tipX = toPx(params.pivotDistance - params.followerLength * Math.cos(phi));
+        const tipY = toPx(-params.followerLength * Math.sin(phi));
+        
+        follower.append("line")
+          .attr("x1", pivotX).attr("y1", 0).attr("x2", tipX).attr("y2", tipY)
+          .attr("stroke", "#475569").attr("stroke-width", isHighlight ? 4 : 2).attr("stroke-linecap", "round");
+        
+        if (params.followerType === FollowerType.OSCILLATING_ROLLER) {
+          follower.append("circle")
+            .attr("cx", tipX).attr("cy", tipY)
+            .attr("r", Math.max(2, toPx(params.followerRadius)))
+            .attr("fill", isHighlight ? color : "none")
+            .attr("stroke", color)
+            .attr("stroke-width", isHighlight ? baseStroke * 2 : baseStroke);
+        } else {
+          const dx = tipX - pivotX; const dy = tipY; const len = Math.sqrt(dx*dx + dy*dy);
+          const ux = -dy/len; const uy = dx/len;
+          const faceHalf = toPx(params.baseRadius * 0.4);
+          follower.append("line")
+            .attr("x1", tipX - ux*faceHalf).attr("y1", tipY - uy*faceHalf)
+            .attr("x2", tipX + ux*faceHalf).attr("y2", tipY + uy*faceHalf)
+            .attr("stroke", color).attr("stroke-width", isHighlight ? baseStroke * 3 : baseStroke * 2);
+        }
+        
+        if (!opacity || opacity > 0.5) {
+          follower.append("circle").attr("cx", pivotX).attr("cy", 0).attr("r", 4).attr("fill", "#64748b");
+        }
       }
-      
-      const currentPhi = phi0 + (currentLift * Math.PI / 180);
-      const mathX = params.pivotDistance - params.followerLength * Math.cos(currentPhi);
-      const mathY = params.followerLength * Math.sin(currentPhi);
-      
-      const screenTipX = scale(mathX);
-      const screenTipY = scale(-mathY); // Flip Y
-      const screenPivotX = scale(params.pivotDistance);
-      const screenPivotY = 0;
-      
-      followerGroup.append("circle")
-        .attr("cx", screenPivotX).attr("cy", screenPivotY)
-        .attr("r", 6).attr("fill", "#94a3b8").attr("stroke", "#1e293b").attr("stroke-width", 2);
-        
-      followerGroup.append("line")
-        .attr("x1", screenPivotX).attr("y1", screenPivotY)
-        .attr("x2", screenTipX).attr("y2", screenTipY)
-        .attr("stroke", "#cbd5e1").attr("stroke-width", 8).attr("stroke-linecap", "round");
-        
-      if (params.followerType === FollowerType.OSCILLATING_ROLLER) {
-           followerGroup.append("circle")
-            .attr("cx", screenTipX).attr("cy", screenTipY)
-            .attr("r", scale(params.followerRadius) - scale(0))
-            .attr("fill", "#f59e0b").attr("stroke", "white").attr("stroke-width", 1.5);
-      } else {
-          const faceLen = 70;
-          const dx = screenTipX - screenPivotX;
-          const dy = screenTipY - screenPivotY;
-          const len = Math.sqrt(dx*dx + dy*dy);
-          const ux = -dy / len;
-          const uy = dx / len;
-          followerGroup.append("line")
-            .attr("x1", screenTipX - ux * faceLen).attr("y1", screenTipY - uy * faceLen)
-            .attr("x2", screenTipX + ux * faceLen).attr("y2", screenTipY + uy * faceLen)
-            .attr("stroke", "#f59e0b").attr("stroke-width", 4);
+      follower.attr("opacity", opacity);
+    };
+
+    // Draw Inversion (Ghost followers attached to cam)
+    if (showInversion) {
+      const ghostGroup = camGroup.append("g");
+      for (let t = 0; t < 360; t += 30) {
+        // Correctly account for rotation when placing ghost followers relative to cam
+        const rot = params.rotation === 'CW' ? -t : t;
+        const sub = ghostGroup.append("g").attr("transform", `rotate(${rot})`);
+        drawFollower(sub, t, "#1e293b", 0.3);
+      }
+      if (maxPaPoint) {
+        const rot = params.rotation === 'CW' ? -maxPaPoint.theta : maxPaPoint.theta;
+        const sub = ghostGroup.append("g").attr("transform", `rotate(${rot})`);
+        drawFollower(sub, maxPaPoint.theta, "#ef4444", 0.8, true);
       }
     }
+
+    // Draw Active Follower (Stationary relative to screen)
+    const followerGroup = g.append("g");
+    drawFollower(followerGroup, Math.abs(currentTheta), "#f59e0b", 1, true);
 
   }, [data, params, currentTheta, showInversion]);
 
@@ -364,58 +244,54 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
                onClick={onCalculate}
                disabled={!isDirty}
                className={`flex items-center gap-1 px-3 py-2 rounded text-xs font-bold transition-all ${
-                 isDirty 
-                   ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/50' 
-                   : 'bg-slate-800 text-slate-500'
+                 isDirty ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg' : 'bg-slate-800 text-slate-500'
                }`}
             >
                <RefreshCw size={14} className={isDirty ? 'animate-spin' : ''} />
-               <span>{isDirty ? 'Update' : 'Ready'}</span>
+               <span>{isDirty ? 'Sync Profile' : 'Synced'}</span>
             </button>
-            <div className="w-px h-8 bg-slate-700 mx-1"></div>
             <button 
+              title="Show Kinematic Inversion"
               onClick={() => setShowInversion(!showInversion)}
-              className={`p-2 rounded transition-colors ${showInversion ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}
-              title="Toggle Inversion Construction"
+              className={`p-2 rounded transition-colors ${showInversion ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
             >
               <Layers size={18} />
             </button>
-            <div className="w-px h-8 bg-slate-700 mx-2"></div>
             <button 
               onClick={() => onPlayChange(!isPlaying)}
-              className="p-2 bg-slate-800 hover:bg-slate-700 rounded text-slate-200 transition-colors"
-              title={isPlaying ? "Pause" : "Play"}
+              className="p-2 bg-slate-800 hover:bg-slate-700 rounded text-slate-200"
             >
               {isPlaying ? <Pause size={18} /> : <Play size={18} />}
             </button>
             <button 
                onClick={() => { onPlayChange(false); onThetaChange(0); }}
-               className="p-2 bg-slate-800 hover:bg-slate-700 rounded text-slate-200 transition-colors"
-               title="Reset"
+               className="p-2 bg-slate-800 hover:bg-slate-700 rounded text-slate-200"
             >
               <RotateCcw size={18} />
             </button>
          </div>
       </div>
       
-      <div className="flex-1 min-h-[400px] relative border border-slate-800 rounded bg-slate-950/50 overflow-hidden">
+      <div className="flex-1 min-h-[400px] relative border border-slate-800 rounded bg-slate-950 overflow-hidden group">
         <svg ref={svgRef} width="100%" height="100%" className="absolute inset-0" />
-        <div className="absolute bottom-4 left-4 text-xs font-mono text-slate-400 bg-slate-900/90 px-3 py-1 rounded border border-slate-700">
+        
+        <div className="absolute bottom-4 left-4 text-[10px] font-mono text-slate-400 bg-slate-900/90 px-2 py-1 rounded border border-slate-700 pointer-events-none">
            θ: {Math.abs(currentTheta).toFixed(1)}°
         </div>
+        
         {maxPaPoint && (
-           <div className="absolute top-4 right-4 text-xs font-mono text-red-400 bg-slate-900/90 px-3 py-1 rounded border border-red-900/30">
-              Max PA: {Math.abs(maxPaPoint.pressureAngle).toFixed(1)}° @ {maxPaPoint.theta.toFixed(1)}°
+           <div className="absolute top-4 right-4 text-[10px] font-mono text-red-400 bg-slate-900/90 px-2 py-1 rounded border border-red-900/30 pointer-events-none">
+              Max PA: {Math.abs(maxPaPoint.pressureAngle).toFixed(1)}°
            </div>
         )}
       </div>
       
       <div className="mt-4 px-2">
          <input 
-           type="range" min="0" max="360" step="0.1"
+           type="range" min="0" max="360" step="0.5"
            value={Math.abs(currentTheta)}
            onChange={(e) => { onPlayChange(false); onThetaChange(Number(e.target.value)); }}
-           className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400"
+           className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400"
          />
       </div>
     </div>

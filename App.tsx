@@ -10,21 +10,21 @@ import { calculateCamProfile } from './utils/camMath';
 import { Activity } from 'lucide-react';
 
 const App: React.FC = () => {
-  // Updated initial state based on user request:
-  // Dwell 1 (20°), Rise 1 (60°), Dwell 2 (20°), Rise 2 (60°), Dwell 3 (20°), Return 1 (180°)
-  // Total = 20 + 60 + 20 + 60 + 20 + 180 = 360°
+  // Updated initial state based on user request for specific duration distribution:
+  // Dwell 1 (30°), Rise 1 (90°), Dwell 2 (30°), Rise 2 (90°), Dwell 3 (30°), Return 1 (90°)
+  // Total = 30 + 90 + 30 + 90 + 30 + 90 = 360°
   const [segments, setSegments] = useState<MotionSegment[]>([
-    { id: '1', type: MotionType.DWELL, duration: 20, deltaLift: 0 },
-    { id: '2', type: MotionType.CYCLOIDAL, duration: 60, deltaLift: 10 },
-    { id: '3', type: MotionType.DWELL, duration: 20, deltaLift: 0 },
-    { id: '4', type: MotionType.CYCLOIDAL, duration: 60, deltaLift: 20 },
-    { id: '5', type: MotionType.DWELL, duration: 20, deltaLift: 0 },
-    { id: '6', type: MotionType.HARMONIC, duration: 180, deltaLift: -30 },
+    { id: '1', type: MotionType.DWELL, duration: 30, deltaLift: 0 },
+    { id: '2', type: MotionType.CYCLOIDAL, duration: 90, deltaLift: 10 },
+    { id: '3', type: MotionType.DWELL, duration: 30, deltaLift: 0 },
+    { id: '4', type: MotionType.CYCLOIDAL, duration: 90, deltaLift: 20 },
+    { id: '5', type: MotionType.DWELL, duration: 30, deltaLift: 0 },
+    { id: '6', type: MotionType.HARMONIC, duration: 90, deltaLift: -30 },
   ]);
 
   const [camParams, setCamParams] = useState<CamParams>({
     followerType: FollowerType.TRANSLATING_ROLLER,
-    baseRadius: 40,
+    baseRadius: 50,
     followerRadius: 10,
     offset: 0,
     pivotDistance: 80,

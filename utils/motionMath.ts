@@ -77,11 +77,16 @@ export const calculateMotion = (
     const startAngle = cumulativeAngle;
     const startLift = cumulativeLift;
     
-    cumulativeAngle += seg.duration;
-    cumulativeLift += seg.deltaLift;
+    const duration = Number(seg.duration) || 0;
+    const deltaLift = Number(seg.deltaLift) || 0;
+    
+    cumulativeAngle += duration;
+    cumulativeLift += deltaLift;
     
     return {
       ...seg,
+      durationVal: duration,
+      deltaLiftVal: deltaLift,
       startAngle,
       endAngle: cumulativeAngle,
       startLift,
@@ -119,8 +124,8 @@ export const calculateMotion = (
     }
 
     const segment = processedSegments[currentSegmentIndex];
-    const beta = segment.duration;
-    const h = segment.deltaLift; // This is the lift change specifically for this segment
+    const beta = segment.durationVal;
+    const h = segment.deltaLiftVal; 
     const startLift = segment.startLift;
     
     let u = 0;

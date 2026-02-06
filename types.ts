@@ -17,8 +17,8 @@ export enum FollowerType {
 export interface MotionSegment {
   id: string;
   type: MotionType;
-  duration: number; // Duration of this segment in degrees
-  deltaLift: number; // Change in lift during this segment (Rise = +, Return = -)
+  duration: number | string; // Duration of this segment in degrees
+  deltaLift: number | string; // Change in lift during this segment (Rise = +, Return = -)
 }
 
 export interface CamParams {

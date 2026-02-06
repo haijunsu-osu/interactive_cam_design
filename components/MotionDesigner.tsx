@@ -11,7 +11,7 @@ interface MotionDesignerProps {
 
 const MotionDesigner: React.FC<MotionDesignerProps> = ({ segments, onSegmentsChange, onGenerateMotion, isDirty }) => {
   const addSegment = () => {
-    const currentTotalAngle = segments.reduce((sum, s) => sum + s.duration, 0);
+    const currentTotalAngle = segments.reduce((sum, s) => sum + (Number(s.duration) || 0), 0);
     const remainingAngle = Math.max(0, 360 - currentTotalAngle);
     const suggestDuration = remainingAngle > 0 ? Math.min(90, remainingAngle) : 90;
     
@@ -38,29 +38,42 @@ const MotionDesigner: React.FC<MotionDesignerProps> = ({ segments, onSegmentsCha
     onSegmentsChange(newSegments);
   };
 
-  const totalAngle = segments.reduce((sum, s) => sum + s.duration, 0);
-  const isComplete = totalAngle === 360;
+  const handleNumberInputChange = (idx: number, field: 'duration' | 'deltaLift', rawValue: string) => {
+    // Allow empty string or just a minus sign (for deltaLift)
+    if (rawValue === '') {
+      updateSegment(idx, field, '');
+      return;
+    }
+    
+    if (field === 'deltaLift' && rawValue === '-') {
+      updateSegment(idx, field, '-');
+      return;
+    }
+
+    // Allow decimal points
+    if (rawValue.endsWith('.')) {
+        updateSegment(idx, field, rawValue);
+        return;
+    }
+
+    const num = Number(rawValue);
+    if (!isNaN(num)) {
+      updateSegment(idx, field, rawValue);
+    }
+  };
+
+  const totalAngle = segments.reduce((sum, s) => sum + (Number(s.duration) || 0), 0);
+  const isComplete = Math.abs(totalAngle - 360) < 0.001;
 
   // Calculate cumulative lifts for display
   let runningLift = 0;
   const cumulativeLifts = segments.map(s => {
-    runningLift += s.deltaLift;
+    runningLift += (Number(s.deltaLift) || 0);
     return runningLift;
   });
 
   return (
     <div className="bg-slate-900 p-4 rounded-lg shadow-lg border border-slate-800">
-      <style>{`
-        input::-webkit-outer-spin-button,
-        input::-webkit-inner-spin-button {
-          -webkit-appearance: none;
-          margin: 0;
-        }
-        input[type=number] {
-          -moz-appearance: textfield;
-        }
-      `}</style>
-
       <div className="flex justify-between items-center mb-4 gap-2">
         <h2 className="text-xl font-bold text-slate-100 whitespace-nowrap">Motion Synthesis</h2>
         <button
@@ -78,7 +91,7 @@ const MotionDesigner: React.FC<MotionDesignerProps> = ({ segments, onSegmentsCha
       
       <div className="mb-4 flex justify-end">
         <div className={`text-[10px] px-2 py-0.5 rounded font-mono ${isComplete ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800/50' : 'bg-amber-900/40 text-amber-400 border border-amber-800/50'}`}>
-          Total Cycle: {totalAngle}°
+          Total Cycle: {totalAngle.toFixed(1)}°
         </div>
       </div>
 
@@ -113,18 +126,20 @@ const MotionDesigner: React.FC<MotionDesignerProps> = ({ segments, onSegmentsCha
 
                 <div className="flex-[1]">
                   <input 
-                    type="number" 
+                    type="text" 
+                    inputMode="decimal"
                     value={seg.duration}
-                    onChange={(e) => updateSegment(idx, 'duration', Number(e.target.value))}
+                    onChange={(e) => handleNumberInputChange(idx, 'duration', e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition-all text-center font-mono"
                   />
                 </div>
 
                 <div className="flex-[1.2]">
                   <input 
-                    type="number" 
+                    type="text" 
+                    inputMode="decimal"
                     value={seg.deltaLift}
-                    onChange={(e) => updateSegment(idx, 'deltaLift', Number(e.target.value))}
+                    onChange={(e) => handleNumberInputChange(idx, 'deltaLift', e.target.value)}
                     placeholder="+ / -"
                     className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition-all text-center font-mono"
                   />
@@ -138,7 +153,7 @@ const MotionDesigner: React.FC<MotionDesignerProps> = ({ segments, onSegmentsCha
                 </button>
               </div>
               <div className="px-10 flex justify-between">
-                 <span className="text-[9px] text-slate-600 uppercase font-bold tracking-tight">Pos: {cumulativeLifts[idx].toFixed(1)} mm</span>
+                 <span className="text-[9px] text-slate-600 uppercase font-bold tracking-tight">Pos: {cumulativeLifts[idx].toFixed(1)}</span>
               </div>
             </div>
           );
@@ -155,7 +170,7 @@ const MotionDesigner: React.FC<MotionDesignerProps> = ({ segments, onSegmentsCha
       {!isComplete && (
         <div className="mt-4 p-2.5 bg-amber-900/10 border border-amber-900/30 rounded flex gap-2.5 items-start text-amber-200/70 text-[10px] leading-tight">
           <AlertCircle size={14} className="shrink-0 text-amber-600" />
-          <p>Motion incomplete ({totalAngle}°/360°).</p>
+          <p>Motion incomplete ({totalAngle.toFixed(1)}°/360°).</p>
         </div>
       )}
     </div>
