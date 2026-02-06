@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import * as d3 from 'd3';
 import { SimulationPoint, CamParams, FollowerType } from '../types';
 import { Play, Pause, RotateCcw, Layers, RefreshCw } from 'lucide-react';
@@ -6,7 +6,7 @@ import { Play, Pause, RotateCcw, Layers, RefreshCw } from 'lucide-react';
 interface CamVisualizerProps {
   data: SimulationPoint[];
   params: CamParams;
-  currentTheta: number;
+  currentTheta: number; // Signed angle from App
   isPlaying: boolean;
   onPlayChange: (playing: boolean) => void;
   onThetaChange: (theta: number) => void;
@@ -27,26 +27,45 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
   const svgRef = useRef<SVGSVGElement>(null);
   const [showInversion, setShowInversion] = useState(true);
 
+  // Identify the point with Maximum Pressure Angle
+  const maxPaPoint = useMemo(() => {
+    if (!data.length) return null;
+    return data.reduce((max, p) => 
+      Math.abs(p.pressureAngle) > Math.abs(max.pressureAngle) ? p : max
+    , data[0]);
+  }, [data]);
+
   // Helper: Linear interpolation for smooth follower movement
   const getInterpolatedLift = (theta: number) => {
     if (data.length === 0) return 0;
+    // Normalize theta to positive 0-360 range for lookup in data
     let t = theta % 360;
     if (t < 0) t += 360;
+    
+    // Data is generated 0-360 inclusive.
+    // Calculate step based on data length (e.g. 721 points -> step 0.5)
     const step = 360 / (data.length - 1);
+    
     const indexFloat = t / step;
     const idx1 = Math.floor(indexFloat);
     const idx2 = Math.min(idx1 + 1, data.length - 1);
     const ratio = indexFloat - idx1;
+    
     const s1 = data[idx1]?.s ?? 0;
     const s2 = data[idx2]?.s ?? 0;
+    
     return s1 + (s2 - s1) * ratio;
   };
 
   // Helper: Calculate Follower Transformation relative to Cam (Inversion)
   const getFollowerTransform = (theta: number) => {
-    // Returns rotation to place ghost follower in cam frame
+    // If Cam rotates CW (Machine View), the Frame rotates CCW relative to Cam.
+    // In SVG, positive rotation is CW. So CCW is negative.
+    // Thus if params.rotation === 'CW', we rotate -theta.
+    // If Cam rotates CCW, Frame rotates CW relative to Cam (+theta).
+    // Note: 'theta' here is the magnitude of the angle from 0.
+    const rot = params.rotation === 'CW' ? -theta : theta;
     const s = getInterpolatedLift(theta);
-    const rot = params.rotation === 'CW' ? theta : -theta;
     return { rotation: rot, lift: s };
   };
 
@@ -61,10 +80,12 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
     const margin = 20;
     const maxDim = Math.min(width, height) / 2 - margin;
     
+    // Determine scale based on geometry
     const maxR = d3.max(data, d => Math.sqrt(d.x*d.x + d.y*d.y)) || 50;
     const scaleDomain = maxR * 2.2; 
     
-    // Create scale. Note SVG y is down, so we flip y in drawing functions usually.
+    // SVG coordinate system: y increases downwards. 
+    // We'll flip y in drawing (scale(-val)) to make math +y go Up.
     const scale = d3.scaleLinear()
       .domain([-scaleDomain, scaleDomain])
       .range([-maxDim, maxDim]);
@@ -79,59 +100,53 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
     g.append("line").attr("x1", 0).attr("y1", -maxDim).attr("x2", 0).attr("y2", maxDim).attr("stroke", axisColor).attr("stroke-dasharray", "4 4");
 
     // --- CAM GROUP ---
-    // Rotates in machine view.
-    const camRotation = params.rotation === 'CW' ? -currentTheta : currentTheta;
+    // Rotates in machine view. currentTheta is signed.
+    // SVG rotate(angle) is Clockwise.
+    // If rotation is CW, currentTheta increases (0, 1, 2). rotate(1) is CW. Correct.
+    // If rotation is CCW, currentTheta decreases (0, -1, -2). rotate(-1) is CCW. Correct.
+    const camRotation = currentTheta;
     const camGroup = g.append("g")
        .attr("transform", `rotate(${camRotation})`);
 
-    // 1. Inversion Construction (Ghosts)
-    if (showInversion) {
-      const ghostGroup = camGroup.append("g").attr("class", "ghosts");
-      const step = 20;
-      
-      for (let t = 0; t < 360; t += step) {
-        const { rotation: rot, lift: s } = getFollowerTransform(t);
-        const ghost = ghostGroup.append("g")
+    // Helper to draw a single ghost follower
+    const drawGhostFollower = (container: any, theta: number, color: string, opacity: number, isHighlight: boolean = false) => {
+        const { rotation: rot, lift: s } = getFollowerTransform(theta);
+        
+        const ghost = container.append("g")
           .attr("transform", `rotate(${rot})`)
-          .attr("opacity", 0.15);
+          .attr("opacity", opacity);
 
-        // Radial Line (Horizontal along +X)
-        ghost.append("line")
-          .attr("x1", 0).attr("y1", 0)
-          .attr("x2", scale(params.baseRadius * 1.5) - scale(0)).attr("y2", 0)
-          .attr("stroke", "#94a3b8")
-          .attr("stroke-dasharray", "2 2");
-
-        // Ghost Follower (Horizontal Orientation)
+        // Draw Follower in "Home" position (Horizontal Right)
         if (params.followerType.includes('Translating')) {
-           const yOffset = scale(-params.offset) - scale(0); // Up if offset positive
+           const yOffset = scale(-params.offset) - scale(0); // SVG Y Flip (positive offset = up)
            let xPos = 0;
            
            if (params.followerType === FollowerType.TRANSLATING_ROLLER) {
               const R_prime = Math.sqrt(Math.pow(params.baseRadius + params.followerRadius, 2) - Math.pow(params.offset, 2));
               xPos = scale(R_prime + s) - scale(0);
               
-              ghost.append("circle")
+              const circle = ghost.append("circle")
                 .attr("cx", xPos).attr("cy", yOffset)
                 .attr("r", scale(params.followerRadius) - scale(0))
-                .attr("fill", "none").attr("stroke", "#f59e0b");
+                .attr("fill", isHighlight ? color : "none")
+                .attr("stroke", color);
+                
+              if (isHighlight) circle.attr("stroke-width", 2);
+
            } else {
               const xVal = params.baseRadius + s;
               xPos = scale(xVal) - scale(0);
               ghost.append("line")
                 .attr("x1", xPos).attr("y1", yOffset - 30)
                 .attr("x2", xPos).attr("y2", yOffset + 30)
-                .attr("stroke", "#f59e0b");
+                .attr("stroke", color)
+                .attr("stroke-width", isHighlight ? 3 : 1);
            }
         } else {
-           // Oscillating (Ghost)
-           const pivotX = scale(params.pivotDistance * Math.cos(0)) - scale(0); // Assuming pivot on X axis?
-           // Wait, usually pivot is defined at some angle. 
-           // In camMath we assumed pivot on X axis (radius r1).
+           // Oscillating
+           const pivotX = scale(params.pivotDistance) - scale(0);
            const pivotY = 0;
-           const px = scale(params.pivotDistance) - scale(0);
            
-           // Calculate Phi
            let phi0 = 0;
            if (params.followerType === FollowerType.OSCILLATING_ROLLER) {
               const num = Math.pow(params.pivotDistance, 2) + Math.pow(params.followerLength, 2) - Math.pow(params.baseRadius + params.followerRadius, 2);
@@ -142,38 +157,33 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
               const DE = Math.sqrt(Math.max(0, AE*AE - params.baseRadius*params.baseRadius));
               phi0 = Math.atan2(params.baseRadius, DE);
            }
-           // IMPORTANT: In horizontal setup, Phi is angle relative to pivot line (X axis).
-           // But direction depends on layout. Let's assume math aligns with X.
-           // However, standard math usually places arm "above" or "below".
-           // Let's assume positive phi rotates towards Y (Up).
            
-           const currentPhi = phi0 + (s * Math.PI / 180); // Adjust sign if needed
-           
-           // Tip position relative to pivot
-           // Arm starts at r1 on X axis, points back towards origin?
-           // In camMath: Pivot at (r1, 0). Tip at (x,y).
-           // x = r1 - r3 cos(phi)
-           // y = r3 sin(phi)
-           // Let's match camMath derivation approximately.
+           const currentPhi = phi0 + (s * Math.PI / 180);
            
            const tipMathX = params.pivotDistance - params.followerLength * Math.cos(currentPhi);
            const tipMathY = params.followerLength * Math.sin(currentPhi);
            
-           const gx1 = scale(params.pivotDistance) - scale(0);
-           const gy1 = 0;
+           const gx1 = pivotX;
+           const gy1 = pivotY;
            const gx2 = scale(tipMathX) - scale(0);
-           const gy2 = scale(-tipMathY) - scale(0); // SVG Y flip
+           const gy2 = scale(-tipMathY) - scale(0);
            
-           ghost.append("line")
-             .attr("x1", gx1).attr("y1", gy1)
-             .attr("x2", gx2).attr("y2", gy2)
-             .attr("stroke", "#cbd5e1");
+           if (!isHighlight) {
+             ghost.append("line")
+               .attr("x1", gx1).attr("y1", gy1)
+               .attr("x2", gx2).attr("y2", gy2)
+               .attr("stroke", "#cbd5e1");
+           }
              
            if (params.followerType === FollowerType.OSCILLATING_ROLLER) {
-              ghost.append("circle")
+              const circle = ghost.append("circle")
                 .attr("cx", gx2).attr("cy", gy2)
                 .attr("r", scale(params.followerRadius) - scale(0))
-                .attr("fill", "none").attr("stroke", "#f59e0b");
+                .attr("fill", isHighlight ? color : "none")
+                .attr("stroke", color);
+                
+              if (isHighlight) circle.attr("stroke-width", 2);
+
            } else {
               // Flat face normal at tip
               const dx = gx2 - gx1;
@@ -183,14 +193,43 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
               ghost.append("line")
                 .attr("x1", gx2 - ux*30).attr("y1", gy2 - uy*30)
                 .attr("x2", gx2 + ux*30).attr("y2", gy2 + uy*30)
-                .attr("stroke", "#f59e0b");
+                .attr("stroke", color)
+                .attr("stroke-width", isHighlight ? 3 : 1);
            }
         }
+    };
+
+    // 1. Inversion Construction (Ghosts)
+    if (showInversion) {
+      const ghostGroup = camGroup.append("g").attr("class", "ghosts");
+      const step = 20;
+      
+      // Standard Grid
+      for (let t = 0; t < 360; t += step) {
+        drawGhostFollower(ghostGroup, t, "#f59e0b", 0.15, false);
+      }
+      
+      // Highlight Max Pressure Angle
+      if (maxPaPoint) {
+         drawGhostFollower(ghostGroup, maxPaPoint.theta, "#ef4444", 0.9, true);
+         
+         // Add label for Max PA
+         const { rotation: rot } = getFollowerTransform(maxPaPoint.theta);
+         const labelGroup = ghostGroup.append("g")
+            .attr("transform", `rotate(${rot})`);
+            
+         const rLabel = scale(params.baseRadius * 1.8) - scale(0);
+         labelGroup.append("text")
+            .attr("x", rLabel)
+            .attr("y", 0)
+            .attr("fill", "#ef4444")
+            .attr("font-size", "10px")
+            .attr("font-weight", "bold")
+            .text(`Max PA: ${Math.abs(maxPaPoint.pressureAngle).toFixed(1)}°`);
       }
     }
 
     // 2. Cam Profile
-    // We use data.x and data.y which are generated for Horizontal contact (at theta=0, x=r, y=0).
     const lineGenerator = d3.line<SimulationPoint>()
       .x(d => scale(d.x))
       .y(d => scale(-d.y)) // Flip Y for SVG
@@ -213,10 +252,10 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
       
     camGroup.append("circle").attr("r", 4).attr("fill", "#94a3b8");
 
-    // --- FOLLOWER GROUP (Stationary) ---
+    // --- FOLLOWER GROUP (Stationary in Machine Frame) ---
     // Drawn horizontally to the Right (+X axis)
     const followerGroup = g.append("g");
-    const currentLift = getInterpolatedLift(currentTheta);
+    const currentLift = getInterpolatedLift(Math.abs(currentTheta)); // Look up by magnitude
     
     if (params.followerType.includes('Translating')) {
        // Horizontal Translation
@@ -362,14 +401,19 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
       <div className="flex-1 min-h-[400px] relative border border-slate-800 rounded bg-slate-950/50 overflow-hidden">
         <svg ref={svgRef} width="100%" height="100%" className="absolute inset-0" />
         <div className="absolute bottom-4 left-4 text-xs font-mono text-slate-400 bg-slate-900/90 px-3 py-1 rounded border border-slate-700">
-           θ: {currentTheta.toFixed(1)}°
+           θ: {Math.abs(currentTheta).toFixed(1)}°
         </div>
+        {maxPaPoint && (
+           <div className="absolute top-4 right-4 text-xs font-mono text-red-400 bg-slate-900/90 px-3 py-1 rounded border border-red-900/30">
+              Max PA: {Math.abs(maxPaPoint.pressureAngle).toFixed(1)}° @ {maxPaPoint.theta.toFixed(1)}°
+           </div>
+        )}
       </div>
       
       <div className="mt-4 px-2">
          <input 
            type="range" min="0" max="360" step="0.1"
-           value={currentTheta}
+           value={Math.abs(currentTheta)}
            onChange={(e) => { onPlayChange(false); onThetaChange(Number(e.target.value)); }}
            className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500 hover:accent-blue-400"
          />
