@@ -61,37 +61,28 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
     const margin = 50;
 
     // 1. CALCULATE WORLD BOUNDS
-    // We need to know the maximum extent of the mechanism to scale it to fit the screen.
     const camMaxR = d3.max(data, d => Math.sqrt(d.x * d.x + d.y * d.y)) || params.baseRadius;
     
     let worldExtent = camMaxR;
     const isOscillating = params.followerType.includes('Oscillating');
     
     if (isOscillating) {
-      // Pivot distance and follower length are part of the machine
       worldExtent = Math.max(worldExtent, params.pivotDistance, params.pivotDistance + params.followerRadius);
-      // Roughly include the swing range
       worldExtent = Math.max(worldExtent, params.pivotDistance + params.followerLength);
     } else {
-      // Stem usually goes out to at least 2x base radius
       worldExtent = Math.max(worldExtent, params.baseRadius * 2.5);
       worldExtent = Math.max(worldExtent, Math.abs(params.offset) + params.followerRadius);
     }
 
     // 2. SCALE FACTOR (Pixels per World Unit)
-    // Map world units to screen pixels. Origin is at 0,0 (cam center).
     const availableDim = Math.min(width, height) / 2 - margin;
     const pxPerUnit = availableDim / worldExtent;
-
-    // Utility to convert world distance to pixel distance
     const toPx = (val: number) => val * pxPerUnit;
 
     // 3. DRAWING
     const baseStroke = 1.5;
     const axisColor = "#1e293b";
 
-    // Center Group (Cam Pivot)
-    // We offset the center slightly to the left if it's a translating follower with a long stem
     const xOffset = isOscillating ? 0 : -toPx(params.baseRadius * 0.5);
     const g = svg.append("g")
       .attr("transform", `translate(${width/2 + xOffset},${height/2})`);
@@ -148,10 +139,10 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
             .attr("stroke", color)
             .attr("stroke-width", isHighlight ? baseStroke * 2 : baseStroke);
           
-          if (!opacity || opacity > 0.5) {
+          if (opacity > 0.5) {
             follower.append("line")
               .attr("x1", xContact).attr("y1", yCenter).attr("x2", xContact + stemLen).attr("y2", yCenter)
-              .attr("stroke", "#475569").attr("stroke-width", 6).attr("stroke-linecap", "round");
+              .attr("stroke", isHighlight ? "#64748b" : "#334155").attr("stroke-width", 6).attr("stroke-linecap", "round");
           }
         } else {
           xContact = toPx(params.baseRadius + s);
@@ -161,10 +152,10 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
             .attr("x2", xContact).attr("y2", yCenter + faceHalf)
             .attr("stroke", color).attr("stroke-width", isHighlight ? baseStroke * 3 : baseStroke * 2);
           
-          if (!opacity || opacity > 0.5) {
+          if (opacity > 0.5) {
             follower.append("line")
               .attr("x1", xContact).attr("y1", yCenter).attr("x2", xContact + stemLen).attr("y2", yCenter)
-              .attr("stroke", "#475569").attr("stroke-width", 6).attr("stroke-linecap", "round");
+              .attr("stroke", isHighlight ? "#64748b" : "#334155").attr("stroke-width", 6).attr("stroke-linecap", "round");
           }
         }
       } else {
@@ -187,7 +178,7 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
         
         follower.append("line")
           .attr("x1", pivotX).attr("y1", 0).attr("x2", tipX).attr("y2", tipY)
-          .attr("stroke", "#475569").attr("stroke-width", isHighlight ? 4 : 2).attr("stroke-linecap", "round");
+          .attr("stroke", isHighlight ? "#94a3b8" : "#475569").attr("stroke-width", isHighlight ? 4 : 2).attr("stroke-linecap", "round");
         
         if (params.followerType === FollowerType.OSCILLATING_ROLLER) {
           follower.append("circle")
@@ -206,7 +197,7 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
             .attr("stroke", color).attr("stroke-width", isHighlight ? baseStroke * 3 : baseStroke * 2);
         }
         
-        if (!opacity || opacity > 0.5) {
+        if (opacity > 0.5) {
           follower.append("circle").attr("cx", pivotX).attr("cy", 0).attr("r", 4).attr("fill", "#64748b");
         }
       }
@@ -216,11 +207,13 @@ const CamVisualizer: React.FC<CamVisualizerProps> = ({
     // Draw Inversion (Ghost followers attached to cam)
     if (showInversion) {
       const ghostGroup = camGroup.append("g");
-      for (let t = 0; t < 360; t += 30) {
+      // Double the number of ghost followers by using a 15-degree interval instead of 30.
+      for (let t = 0; t < 360; t += 15) {
         // Correctly account for rotation when placing ghost followers relative to cam
         const rot = params.rotation === 'CW' ? -t : t;
         const sub = ghostGroup.append("g").attr("transform", `rotate(${rot})`);
-        drawFollower(sub, t, "#1e293b", 0.3);
+        // Use a lighter slate color (#64748b) and slightly higher opacity (0.4) for better contrast
+        drawFollower(sub, t, "#64748b", 0.4); 
       }
       if (maxPaPoint) {
         const rot = params.rotation === 'CW' ? -maxPaPoint.theta : maxPaPoint.theta;
